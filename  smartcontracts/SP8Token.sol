@@ -43,7 +43,7 @@ contract Owned {
     }
     function acceptOwnership() public {
         require(msg.sender == newOwner);
-        //emit OwnershipTransferred(owner, newOwner);
+        emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
         newOwner = address(0);
     }
@@ -63,8 +63,8 @@ contract SPXTROSInterface{
     //custom interface function
     function transferTokens(address _recipient, uint256 _value, uint256 _ratePerETH) public returns (bool);
     function getExchangeRate() public constant returns(uint256); 
-    function tokens2Vouchers(string _txHash, bytes32 _message, bytes32 r, bytes32 s, uint8 v, uint256 _value) public returns(bool);
-    function vouchers2Tokens(string _txHash, address _recipient, uint _amount) public returns(bool);
+    function tokens2Vouchers(bytes32 _message, bytes32 r, bytes32 s, uint8 v, uint256[] _value, bytes32[] _voucherIDs) public returns(bytes32[]);
+    function vouchers2Tokens(address _recipient, bytes32[] _voucherIDs) public returns(bytes32[]);
     function buy() payable public;
 
     event Transfer(address indexed from, address indexed to, uint tokens);
@@ -88,13 +88,13 @@ contract BasicToken is SPXTROSInterface, Owned {
     using SafeMath for uint256;
     
     uint256 public exchangeRate = 38417; // 1 ETH = 38417 SP8
-    string public symbol; // the symbol of token
-    string public name; // the name of token
-    uint public decimals = 18; 
-    uint public totalSupply; // the total token
-    address icoAddress; // the ico address
+    string public symbol;
+    string public name;
+    uint public decimals = 18;
+    uint public totalSupply;
+    address icoAddress;
 
-    mapping(address => uint) balances; // balance of address in token
+    mapping(address => uint) balances;
     mapping(address => mapping(address => uint)) allowed;
 
     // ------------------------------------------------------------------------
@@ -105,7 +105,7 @@ contract BasicToken is SPXTROSInterface, Owned {
         name = _name;
         totalSupply = _initialSupply * 10**uint(decimals);
         balances[owner] = totalSupply;
-        //emit Transfer(address(0), owner, totalSupply);
+        emit Transfer(address(0), owner, totalSupply);
     }
 
     // ------------------------------------------------------------------------
@@ -132,7 +132,7 @@ contract BasicToken is SPXTROSInterface, Owned {
         require(to != 0x0);
         balances[tx.origin] = balances[tx.origin].sub(tokens);
         balances[to] = balances[to].add(tokens);
-        //emit Transfer(tx.origin, to, tokens);
+        emit Transfer(tx.origin, to, tokens);
         return true;
     }
 
@@ -146,7 +146,7 @@ contract BasicToken is SPXTROSInterface, Owned {
     // ------------------------------------------------------------------------
     function approve(address spender, uint tokens) public returns (bool success) {
         allowed[msg.sender][spender] = tokens;
-        //emit Approval(msg.sender, spender, tokens);
+        emit Approval(msg.sender, spender, tokens);
         return true;
     }
 
@@ -163,9 +163,9 @@ contract BasicToken is SPXTROSInterface, Owned {
         require(tokens > 0);
         require(balanceOf(from) > tokens);
         balances[from] = balances[from].sub(tokens);
-        // allowed[from][tx.origin] = allowed[from][tx.origin].sub(tokens);
+        allowed[from][tx.origin] = allowed[from][tx.origin].sub(tokens);
         balances[to] = balances[to].add(tokens);
-        //emit Transfer(from, to, tokens);
+        emit Transfer(from, to, tokens);
         return true;
     }
 
@@ -184,7 +184,7 @@ contract BasicToken is SPXTROSInterface, Owned {
     // ------------------------------------------------------------------------
     function approveAndCall(address spender, uint tokens, bytes data) public returns (bool success) {
         allowed[tx.origin][spender] = tokens;
-        //emit Approval(tx.origin, spender, tokens);
+        emit Approval(tx.origin, spender, tokens);
         ApproveAndCallFallBack(spender).receiveApproval(tx.origin, tokens, this, data);
         return true;
     }
@@ -205,14 +205,15 @@ contract BasicToken is SPXTROSInterface, Owned {
 }
 
 contract SP8Token is BasicToken{
-    string public version = "1.0"; // current version of contract
+    string public version = "1.0";
     
     struct Voucher{
-        address vBuyer; // the address of buyer voucher
-        uint vAmount; // the value have to pay
+        uint vAmount;
+        bool vStatus;
     }
-
-    mapping(string => Voucher) vouchers; // list history of voucher
+    
+    mapping(address => uint256) totalTokenVouchers;
+    mapping(address => mapping(bytes32 => Voucher)) vouchers;
     
     function SP8Token(
         uint256 _initialSupply, 
@@ -227,72 +228,58 @@ contract SP8Token is BasicToken{
         return true;
     }
     
-    // ------------------------------------------------------------------------
-    // @notice Buy tokens from contract by sending ether
-    // function buy()
-    // call if someone want to buy token (must to pay with ether)
-    // ------------------------------------------------------------------------
+    /// @notice Buy tokens from contract by sending ether
     function buy() payable public {
         require(exchangeRate > 0);
         require(tx.origin != 0x0);
         require(msg.value != 0);
         uint toEther = msg.value.div(1 ether);
         uint amount = toEther.mul(exchangeRate*10**decimals);               // calculates the amount
-        owner.transfer(msg.value); // owner of contract receive ether
+        owner.transfer(msg.value);
         balances[owner] = balances[owner].sub(amount);
         balances[tx.origin] = balances[tx.origin].add(amount);
     }
     
-    // ------------------------------------------------------------------------
-    // Fallback function when receiving Ether.
-    // ------------------------------------------------------------------------
+    //Fallback function when receiving Ether.
     function() payable public{
         buy();
     }
     
-    // ------------------------------------------------------------------------
-    // function tokens2Vouchers
-    // use token to buy vouchers.
-    // owner will give token and refund voucher for investor
-    // @param _txtHash          string                  the hash of transaction
-    // @param _message          bytes32                 the message buyer signature
-    // @param r,s,v                                     the signatures of transaction
-    // @param _value            uint256                 the value need to pay
-    // @return param1           bool                    status of transaction
-    // ------------------------------------------------------------------------
-    function tokens2Vouchers(string _txHash, bytes32 _message, bytes32 r, bytes32 s, uint8 v, uint256 _value) public returns(bool) {
-        Voucher memory _voucher = vouchers[_txHash];
-        require(_voucher.vBuyer == 0x0);
-        address _recipient = ecrecover(_message, v, r, s);
+    function tokens2Vouchers(bytes32 _message, bytes32 r, bytes32 s, uint8 v, uint256[] _value, bytes32[] _voucherIDs) public returns(bytes32[]) {
+        require(_voucherIDs.length <= 100);
         require(tx.origin == owner);
-        require(_value > 0);
-        uint256 _finalValue = _value;
+        address _recipient = ecrecover(_message, v, r, s);
+        require(_recipient != owner);
+        require(_value.length == _voucherIDs.length);
+        uint256 _finalValue = 0;
+        for(uint i = 0; i < _voucherIDs.length; i++) {
+            Voucher storage _voucher = vouchers[_recipient][_voucherIDs[i]];
+            require(_voucher.vAmount == 0);
+            _voucher.vAmount = _value[i];
+            _voucher.vStatus = true;
+            _finalValue = _finalValue.add(_value[i]);
+        }
         require(balanceOf(_recipient) > _finalValue);
-        balances[_recipient] -= _finalValue;
-        balances[owner] += _finalValue; //owner receive token from sender
-        vouchers[_txHash] = Voucher(_recipient, _finalValue); // save transaction history
-        return true;
+        totalTokenVouchers[_recipient] = totalTokenVouchers[_recipient].add(_finalValue);
+        balances[_recipient] = balances[_recipient].sub(_finalValue);
+        balances[owner] = balances[owner].add(_finalValue);
+        return _voucherIDs;
     }
     
-    // ------------------------------------------------------------------------
-    // function vouchers2Token
-    // call if owner refund token for investor
-    // @param _txtHash          string                  the hash of transaction
-    // @param _recepient        address                 the address receive token
-    // @param _amount           uint256                 the token need to refund
-    // @return param1           bool                    status of transaction
-    // ------------------------------------------------------------------------
-    function vouchers2Tokens(string _txHash, address _recipient, uint256 _amount) onlyOwner public returns(bool) {
-        require(_recipient != 0x0);
-        require(_amount >= 0);
-        require(tx.origin == owner);
-        Voucher storage voucher = vouchers[_txHash];
-        require(_recipient == voucher.vBuyer);
-        require(voucher.vAmount - _amount >= 0);
-        voucher.vAmount -= _amount;
-        balances[owner] -= _amount; // owner send token to receiver
-        balances[_recipient] += _amount; // recipient receive token
-        return true;
+    function vouchers2Tokens(address _recipient, bytes32[] _voucherIDs) onlyOwner public returns(bytes32[]) {
+        require(_voucherIDs.length <= 100);
+        uint256 _total = totalTokenVouchers[_recipient];
+        require(_total > 0);
+        uint256 _finalValue = 0;
+        for(uint i = 0; i < _voucherIDs.length; i++){
+            Voucher storage _voucher = vouchers[_recipient][_voucherIDs[i]];
+            require(_voucher.vStatus);
+            require(_voucher.vAmount != 0);
+            _finalValue = _finalValue.add(_voucher.vAmount);
+        }
+        balances[owner] = balances[owner].sub(_finalValue);
+        balances[_recipient] = balances[_recipient].add(_finalValue);
+        return _voucherIDs;
     }
     
     /// @notice owner can change this address
@@ -311,23 +298,11 @@ contract SP8Token is BasicToken{
         return icoAddress;
     }
     
-    // ------------------------------------------------------------------------
-    // function setExchangeRate
-    // use when owner want to set new exchange rate for token
-    // only owner can call function
-    // @param _newExchangeRate          uint256             the new exchange rate of token
-    // @return param1                   bool                status of transaction
-    // ------------------------------------------------------------------------
     function setExchangeRate(uint256 _newExchangeRate) onlyOwner public returns(bool){
         require(_newExchangeRate > 0);
         exchangeRate = _newExchangeRate;
     }
     
-    // ------------------------------------------------------------------------
-    // function getExchangeRate
-    // return the current exchange rate of token
-    // @return param1                   uint256             the current exchange rate
-    // ------------------------------------------------------------------------
     function getExchangeRate() public constant returns(uint256) {
         return exchangeRate;
     }

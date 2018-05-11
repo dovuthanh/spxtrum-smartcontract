@@ -2,17 +2,17 @@ pragma solidity ^0.4.18;
 import "./SP8Token.sol";
 
 contract ICOPhase {
-    uint256 public phasePresale_From = 1522627200;//0h 16/01/2018 GMT (test 26/12/2017)
-    uint256 public phasePresale_To = 1522713600;//0h 21/01/2018 GMT
+    uint256 public phasePresale_From = 1522972800;//0h 06/04/2018 GMT
+    uint256 public phasePresale_To = 1523577600;//0h 13/04/2018 GMT
 
-    uint256 public phasePublicSale1_From = 1522713600;//0h 21/01/2018 GMT
-    uint256 public phasePublicSale1_To = 1522800000;//0h 26/01/2018 GMT
+    uint256 public phasePublicSale1_From = 1523577600;//0h 13/04/2018 GMT
+    uint256 public phasePublicSale1_To = 1524182400;//0h 20/04/2018 GMT
 
-    uint256 public phasePublicSale2_From = 1522800000;//0h 26/01/2018 GMT
-    uint256 public phasePublicSale2_To = 1522800000;//0h 31/01/2018 GMT
+    uint256 public phasePublicSale2_From = 1524182400;//0h 20/04/2018 GMT
+    uint256 public phasePublicSale2_To = 1524787200;//0h 27/04/2018 GMT
 
-    uint256 public phasePublicSale3_From = 1522800000;//0h 31/01/2018 GMT
-    uint256 public phasePublicSale3_To = 1522972800;//0h 05/02/2018 GMT
+    uint256 public phasePublicSale3_From = 1524787200;//0h 27/04/2018 GMT
+    uint256 public phasePublicSale3_To = 1526774400;//0h 20/05/2018 GMT
 }
 
 // ------------------------------------------------------------------------
